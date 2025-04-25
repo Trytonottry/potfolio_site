@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Developer Portfolio</title>
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/@moralisweb3/core@2.7.0/dist/index.umd.js"></script>
+    <script src="https://unpkg.com/react-router-dom@6.3.0/umd/react-router-dom.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; }
+        canvas { position: fixed; top: 0; left: 0; z-index: -1; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { BrowserRouter, Route, Routes, useNavigate, useParams } = ReactRouterDOM;
+
+        // Three.js Particle Background
+        function ParticleBackground({ onProjectSelect }) {
+            const mountRef = useRef(null);
+            useEffect(() => {
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                const renderer = new THREE.WebGLRenderer({ alpha: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                mountRef.current.appendChild(renderer.domElement);
+
+                const particles = new THREE.BufferGeometry();
+                const particleCount = 3;
+                const posArray = new Float32Array(particleCount * 3);
+                const projects = [
+                    { id: 0, name: "Custom Blockchain", path: "/project/0" },
+                    { id: 1, name: "DEX Arbitrage", path: "/project/1" },
+                    { id: 2, name: "dApp", path: "/project/2" }
+                ];
+                for (let i = 0; i < particleCount; i++) {
+                    posArray[i * 3] = (i - 1) * 10;
+                    posArray[i * 3 + 1] = 0;
+                    posArray[i * 3 + 2] = 0;
+                }
+                particles.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+                const material = new THREE.PointsMaterial({
+                    size: 1,
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const particleSystem = new THREE.Points(particles, material);
+                scene.add(particleSystem);
+
+                camera.position.z = 20;
+
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+                const onClick = (event) => {
+                    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObject(particleSystem);
+                    if (intersects.length > 0) {
+                        const index = Math.floor(intersects[0].index);
+                        onProjectSelect(projects[index].path);
+                    }
+                };
+                window.addEventListener('click', onClick);
+
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    particleSystem.rotation.y += 0.001;
+                    renderer.render(scene, camera);
+                };
+                animate();
+
+                const handleResize = () => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                };
+                window.addEventListener('resize', handleResize);
+
+                return () => {
+                    mountRef.current.removeChild(renderer.domElement);
+                    window.removeEventListener('resize', handleResize);
+                    window.removeEventListener('click', onClick);
+                };
+            }, [onProjectSelect]);
+            return <div ref={mountRef} />;
+        }
+
+        // Web3 Context
+        function Web3Provider({ children }) {
+            const [account, setAccount] = useState(null);
+            const [balance, setBalance] = useState('0');
+            const [nfts, setNfts] = useState([]);
+            const [nftPage, setNftPage] = useState(1);
+            const [nftFilter, setNftFilter] = useState('');
+            const [ensName, setEnsName] = useState('');
+            const [ensAddress, setEnsAddress] = useState('');
+            const [ensReverse, setEnsReverse] = useState('');
+            const [transactions, setTransactions] = useState([]);
+            const [web3, setWeb3] = useState(null);
+
+            useEffect(() => {
+                if (window.ethereum) {
+                    const web3Instance = new Web3(window.ethereum);
+                    web3Instance.eth.ens.resolverContractAddress = '0x4976fb03C32e5B8cfe2b6cCB31c09Ba78EBaBa41';
+                    setWeb3(web3Instance);
+                    Moralis.start({ apiKey: 'YOUR_MORALIS_API_KEY' });
+                }
+            }, []);
+
+            async function connectWallet() {
+                if (window.ethereum) {
+                    try {
+                        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                        setAccount(accounts[0]);
+                        fetchBalance(accounts[0]);
+                        fetchNFTs(accounts[0]);
+                        fetchTransactions(accounts[0]);
+                        fetchEnsReverse(accounts[0]);
+                    } catch (error) {
+                        console.error('Connection failed:', error);
+                    }
+                } else {
+                    alert('Please install Metamask!');
+                }
+            }
+
+            async function fetchBalance(address) {
+                if (web3) {
+                    const bal = await web3.eth.getBalance(address);
+                    setBalance(web3.utils.fromWei(bal, 'ether'));
+                }
+            }
+
+            async function fetchNFTs(address) {
+                try {
+                    const response = await Moralis.EvmApi.nft.getWalletNFTs({
+                        chain: '0x1',
+                        address
+                    });
+                    setNfts(response.result);
+                } catch (error) {
+                    console.error('NFT fetch failed:', error);
+                }
+            }
+
+            async function fetchTransactions(address) {
+                if (web3) {
+                    const latestBlock = await web3.eth.getBlockNumber();
+                    const logs = await web3.eth.getPastLogs({
+                        fromBlock: latestBlock - 1000,
+                        address,
+                    });
+                    const txs = await Promise.all(
+                        logs.slice(0, 5).map(async (log) => {
+                            const tx = await web3.eth.getTransaction(log.transactionHash);
+                            return {
+                                hash: log.transactionHash,
+                                to: tx.to,
+                                value: web3.utils.fromWei(tx.value, 'ether')
+                            };
+                        })
+                    );
+                    setTransactions(txs);
+                }
+            }
+
+            async function resolveEns() {
+                if (web3 && ensName) {
+                    try {
+                        const address = await web3.eth.ens.getAddress(ensName);
+                        set unicodes
+                        setEnsAddress(address);
+                    } catch (error) {
+                        setEnsAddress('Invalid ENS name');
+                    }
+                }
+            }
+
+            async function fetchEnsReverse(address) {
+                if (web3) {
+                    try {
+                        const name = await web3.eth.ens.getName(address);
+                        setEnsReverse(name.name || 'No ENS name');
+                    } catch (error) {
+                        setEnsReverse('No ENS name');
+                    }
+                }
+            }
+
+            const nftsPerPage = 6;
+            const filteredNfts = nftFilter
+                ? nfts.filter(nft => nft.contractAddress.toLowerCase() === nftFilter.toLowerCase())
+                : nfts;
+            const paginatedNfts = filteredNfts.slice((nftPage - 1) * nftsPerPage, nftPage * nftsPerPage);
+            const totalPages = Math.ceil(filteredNfts.length / nftsPerPage);
+            const uniqueCollections = [...new Set(nfts.map(nft => nft.contractAddress))];
+
+            return (
+                <div>
+                    {children({
+                        account,
+                        balance,
+                        connectWallet,
+                        nfts: paginatedNfts,
+                        nftPage,
+                        setNftPage,
+                        nftFilter,
+                        setNftFilter,
+                        totalPages,
+                        uniqueCollections,
+                        ensName,
+                        setEnsName,
+                        ensAddress,
+                        resolveEns,
+                        ensReverse,
+                        transactions,
+                        web3
+                    })}
+                </div>
+            );
+        }
+
+        // Home Page
+        function Home() {
+            const navigate = useNavigate();
+            return (
+                <div className="min-h-screen text-white font-sans">
+                    <ParticleBackground onProjectSelect={(path) => navigate(path)} />
+                    <div className="container mx-auto p-6 relative z-10">
+                        <header className="flex flex-col sm:flex-row justify-between items-center mb-8">
+                            <h1 className="text-4xl font-bold text-cyan-400">Blockchain Developer</h1>
+                            <Web3Header />
+                        </header>
+                        <section className="mb-12">
+                            <h2 className="text-3xl font-bold text-purple-400 mb-4">About Me</h2>
+                            <p className="text-lg">
+                                I'm a blockchain developer with expertise in Ethereum, smart contracts, and Web3. 
+                                Skilled in C++, Python, JavaScript, and Three.js for immersive experiences.
+                            </p>
+                            <p className="text-sm text-gray-400 mt-4">Click particles to explore my projects!</p>
+                        </section>
+                        <Web3Widgets />
+                    </div>
+                </div>
+            );
+        }
+
+        // Web3 Header Component
+        function Web3Header() {
+            const { account, balance, connectWallet, ensReverse } = React.useContext(Web3Provider);
+            return account ? (
+                <div className="text-sm text-right">
+                    <p>Address: {account.slice(0, 6)}...{account.slice(-4)}</p>
+                    <p>ENS: {ensReverse}</p>
+                    <p>ETH: {parseFloat(balance).toFixed(4)}</p>
+                </div>
+            ) : (
+                <button
+                    onClick={connectWallet}
+                    className="bg-cyan-500 text-black px-4 py-2 rounded hover:bg-cyan-600"
+                >
+                    Connect Wallet
+                </button>
+            );
+        }
+
+        // Web3 Widgets Component
+        function Web3Widgets() {
+            const {
+                nfts,
+                nftPage,
+                setNftPage,
+                nftFilter,
+                setNftFilter,
+                totalPages,
+                uniqueCollections,
+                ensName,
+                setEnsName,
+                ensAddress,
+                resolveEns,
+                transactions
+            } = React.useContext(Web3Provider);
+
+            return (
+                <>
+                    <section className="mb-12">
+                        <h2 className="text-3xl font-bold text-purple-400 mb-4">NFT Gallery</h2>
+                        <div className="mb-4">
+                            <select
+                                value={nftFilter}
+                                onChange={(e) => setNftFilter(e.target.value)}
+                                className="p-2 bg-gray-800 border border-cyan-500 rounded text-white"
+                            >
+                                <option value="">All Collections</option>
+                                {uniqueCollections.map((addr) => (
+                                    <option key={addr} value={addr}>{addr.slice(0, 6)}...{addr.slice(-4)}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {nfts.length > 0 ? (
+                                nfts.map((nft, index) => (
+                                    <div key={index} className="bg-gray-800 p-4 rounded shadow-lg">
+                                        <img
+                                            src={nft.metadata?.image || 'https://via.placeholder.com/150'}
+                                            alt={nft.metadata?.name || 'NFT'}
+                                            className="w-full h-40 object-cover rounded"
+                                        />
+                                        <p className="mt-2">{nft.metadata?.name || 'Unknown NFT'}</p>
+                                    </div>
+                                ))
+                            ) : (
+                                <p>No NFTs found. Connect wallet to display.</p>
+                            )}
+                        </div>
+                        <div className="flex gap-4 mt-4">
+                            <button
+                                onClick={() => setNftPage(p => Math.max(1, p - 1))}
+                                disabled={nftPage === 1}
+                                className="bg-cyan-500 text-black px-4 py-2 rounded hover:bg-cyan-600 disabled:opacity-50"
+                            >
+                                Previous
+                            </button>
+                            <p>Page {nftPage} of {totalPages}</p>
+                            <button
+                                onClick={() => setNftPage(p => Math.min(totalPages, p + 1))}
+                                disabled={nftPage === totalPages}
+                                className="bg-cyan-500 text-black px-4 py-2 rounded hover:bg-cyan-600 disabled:opacity-50"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </section>
+                    <section className="mb-12">
+                        <h2 className="text-3xl font-bold text-purple-400 mb-4">ENS Resolver</h2>
+                        <div className="flex gap-4">
+                            <input
+                                type="text"
+                                placeholder="Enter ENS name (e.g., vitalik.eth)"
+                                value={ensName}
+                                onChange={(e) => setEnsName(e.target.value)}
+                                className="p-2 bg-gray-800 border border-cyan-500 rounded text-white"
+                            />
+                            <button
+                                onClick={resolveEns}
+                                className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+                            >
+                                Resolve
+                            </button>
+                        </div>
+                        {ensAddress && <p className="mt-4">Resolved Address: {ensAddress}</p>}
+                    </section>
+                    <section>
+                        <h2 className="text-3xl font-bold text-purple-400 mb-4">Recent Transactions</h2>
+                        {transactions.length > 0 ? (
+                            <ul className="space-y-2">
+                                {transactions.map((tx, index) => (
+                                    <li key={index} className="bg-gray-800 p-4 rounded">
+                                        <p>Hash: {tx.hash.slice(0, 6)}...{tx.hash.slice(-4)}</p>
+                                        <p>To: {tx.to?.slice(0, 6)}...{tx.to?.slice(-4)}</p>
+                                        <p>Value: {parseFloat(tx.value).toFixed(4)} ETH</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p>No recent transactions found.</p>
+                        )}
+                    </section>
+                </>
+            );
+        }
+
+        // Blockchain Project Page
+        function BlockchainProject() {
+            const { web3 } = React.useContext(Web3Provider);
+            const [chain, setChain] = useState(null);
+
+            async function fetchChain() {
+                // Имитация вызова REST API блокчейна (замените на реальный эндпоинт)
+                try {
+                    const response = await fetch('http://localhost:8080/api/chain');
+                    const data = await response.json();
+                    setChain(data);
+                } catch (error) {
+                    console.error('Failed to fetch chain:', error);
+                }
+            }
+
+            return (
+                <div className="min-h-screen text-white font-sans">
+                    <ParticleBackground onProjectSelect={() => {}} />
+                    <div className="container mx-auto p-6 relative z-10">
+                        <header className="flex flex-col sm:flex-row justify-between items-center mb-8">
+                            <h1 className="text-4xl font-bold text-cyan-400">Custom Blockchain</h1>
+                            <Web3Header />
+                        </header>
+                        <section className="mb-12">
+                            <h2 className="text-3xl font-bold text-purple-400 mb-4">Project Overview</h2>
+                            <p className="text-lg">
+                                A proof-of-work blockchain with P2P networking and REST API. Built in C++ with Boost.Asio and OpenSSL.
+                                Features dynamic difficulty adjustment and block validation.
+                            </p>
+                            <h3 className="text-2xl font-bold text-purple-400 mt-6 mb-2">Demo</h3>
+                            <button
+                                onClick={fetchChain}
+                                className="bg-cyan-500 text-black px-4 py-2 rounded hover:bg-cyan-600"
+                            >
+                                Fetch Blockchain
+                            </button>
+                            {chain && (
+                                <pre className="bg-gray-800 p-4 rounded mt-4 overflow-auto">
+                                    {JSON.stringify(chain, null, 2)}
+                                </pre>
+                            )}
+                        </section>
+                        <Web3Widgets />
+                    </div>
+                </div>
+            );
+        }
+
+        // DEX Arbitrage Project Page
+        function ArbitrageProject() {
+            const { web3 } = React.useContext(Web3Provider);
+            const [prices, setPrices] = useState(null);
+
+            const POOLS = {
+                Uniswap: '0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc',
+                Sushiswap: '0x397FF1542f962076d0BFE58eA045FfA2d347ACa0'
+            };
+            const UNISWAP_PAIR_ABI = [
+                {
+                    constant: true,
+                    inputs: [],
+                    name: 'getReserves',
+                    outputs: [
+                        { name: 'reserve0', type: 'uint112' },
+                        { name: 'reserve1', type: 'uint112' },
+                        { name: 'blockTimestampLast', type: 'uint32' }
+                    ],
+                    payable: false,
+                    stateMutability: 'view',
+                    type: 'function'
+                }
+            ];
+
+            async function fetchPrices() {
+                if (web3) {
+                    const prices = {};
+                    for (const [dex, addr] of Object.entries(POOLS)) {
+                        const contract = new web3.eth.Contract(UNISWAP_PAIR_ABI, addr);
+                        const reserves = await contract.methods.getReserves().call();
+                        prices[dex] = reserves[1] / reserves[0];
+                    }
+                    setPrices(prices);
+                }
+            }
+
+            return (
+                <div className="min-h-screen text-white font-sans">
+                    <ParticleBackground onProjectSelect={() => {}} />
+                    <div className="container mx-auto p-6 relative z-10">
+                        <header className="flex flex-col sm:flex-row justify-between items-center mb-8">
+                            <h1 className="text-4xl font-bold text-cyan-400">DEX Arbitrage Bot</h1>
+                            <Web3Header />
+                        </header>
+                        <section className="mb-12">
+                            <h2 className="text-3xl font-bold text-purple-400 mb-4">Project Overview</h2>
+                            <p className="text-lg">
+                                A Python bot for arbitrage between Uniswap and Sushiswap. Uses Web3.py for real-time price monitoring
+                                and transaction execution.
+                            </p>
+                            <h3 className="text-2xl font-bold text-purple-400 mt-6 mb-2">Demo</h3>
+                            <button
+                                onClick={fetchPrices}
+                                className="bg-cyan-500 text-black px-4 py-2 rounded hover:bg-cyan-600"
+                            >
+                                Fetch Prices
+                            </button>
+                            {prices && (
+                                <div className="mt-4">
+                                    <p>Uniswap WETH/USDC: {prices.Uniswap.toFixed(6)}</p>
+                                    <p>Sushiswap WETH/USDC: {prices.Sushiswap.toFixed(6)}</p>
+                                </div>
+                            )}
+                        </section>
+                        <Web3Widgets />
+                    </div>
+                </div>
+            );
+        }
+
+        // dApp Project Page
+        function DAppProject() {
+            const { web3, account } = React.useContext(Web3Provider);
+            const [recipient, setRecipient] = useState('');
+            const [amount, setAmount] = useState('');
+            const [balance, setBalance] = useState('0');
+
+            const TOKEN_ABI = [
+                {
+                    constant: true,
+                    inputs: [{ name: '_owner', type: 'address' }],
+                    name: 'balanceOf',
+                    outputs: [{ name: 'balance', type: 'uint256' }],
+                    type: 'function'
+                },
+                {
+                    constant: false,
+                    inputs: [
+                        { name: '_to', type: 'address' },
+                        { name: '_value', type: 'uint256' }
+                    ],
+                    name: 'transfer',
+                    outputs: [{ name: 'success', type: 'bool' }],
+                    type: 'function'
+                }
+            ];
+            const TOKEN_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606e USDC;
+
+            async function fetchBalance() {
+                if (web3 && account) {
+                    const contract = new web3.eth.Contract(TOKEN_ABI, TOKEN_ADDRESS);
+                    const bal = await contract.methods.balanceOf(account).call();
+                    setBalance(web3.utils.fromWei(bal, 'mwei'));
+                }
+            }
+
+            async function transferTokens() {
+                if (web3 && account && recipient && amount) {
+                    const contract = new web3.eth.Contract(TOKEN_ABI, TOKEN_ADDRESS);
+                    const amountWei = web3.utils.toWei(amount, 'mwei');
+                    try {
+                        await contract.methods.transfer(recipient, amountWei).send({ from: account });
+                        alert('Transfer successful!');
+                        fetchBalance();
+                    } catch (error) {
+                        alert('Transfer failed: ' + error.message);
+                    }
+                }
+            }
+
+            useEffect(() => {
+                fetchBalance();
+            }, [account, web3]);
+
+            return (
+                <div className="min-h-screen text-white font-sans">
+                    <ParticleBackground onProjectSelect={() => {}} />
+                    <div className="container mx-auto p-6 relative z-10">
+                        <header className="flex flex-col sm:flex-row justify-between items-center mb-8">
+                            <h1 className="text-4xl font-bold text-cyan-400">Web3 dApp</h1>
+                            <Web3Header />
+                        </header>
+                        <section className="mb-12">
+                            <h2 className="text-3xl font-bold text-purple-400 mb-4">Project Overview</h2>
+                            <p className="text-lg">
+                                A React-based dApp with Metamask integration. Supports token transfers and balance checking
+                                for ERC20 tokens like USDC.
+                            </p>
+                            <h3 className="text-2xl font-bold text-purple-400 mt-6 mb-2">Demo</h3>
+                            {account ? (
+                                <div className="w-full max-w-md">
+                                    <p className="text-lg mb-2">USDC Balance: {balance}</p>
+                                    <input
+                                        type="text"
+                                        placeholder="Recipient address"
+                                        value={recipient}
+                                        onChange={(e) => setRecipient(e.target.value)}
+                                        className="w-full p-2 mb-2 bg-gray-800 border border-cyan-500 rounded text-white"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Amount (USDC)"
+                                        value={amount}
+                                        onChange={(e) => setAmount(e.target.value)}
+                                        className="w-full p-2 mb-2 bg-gray-800 border border-cyan-500 rounded text-white"
+                                    />
+                                    <button
+                                        onClick={transferTokens}
+                                        className="w-full bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                                    >
+                                        Send USDC
+                                    </button>
+                                </div>
+                            ) : (
+                                <p>Connect wallet to try the demo.</p>
+                            )}
+                        </section>
+                        <Web3Widgets />
+                    </div>
+                </div>
+            );
+        }
+
+        // App
+        function App() {
+            return (
+                <BrowserRouter>
+                    <Web3Provider>
+                        <Routes>
+                            <Route path="/" element={<Home />} />
+                            <Route path="/project/0" element={<BlockchainProject />} />
+                            <Route path="/project/1" element={<ArbitrageProject />} />
+                            <Route path="/project/2" element={<DAppProject />} />
+                        </Routes>
+                    </Web3Provider>
+                </BrowserRouter>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
